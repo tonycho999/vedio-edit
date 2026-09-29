@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>비디오 병합기</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; background: #f5f5f5; }
+        .container { max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h1 { text-align: center; color: #333; }
+        .upload-box { border: 2px dashed #ccc; padding: 20px; text-align: center; margin-bottom: 20px; cursor: pointer; }
+        button { width: 100%; padding: 12px; background: #007bff; color: white; border: none; border-radius: 4px; font-size: 16px; cursor: pointer; }
+        button:disabled { background: #ccc; }
+        #status { margin-top: 15px; text-align: center; font-weight: bold; color: #666; }
+        video { width: 100%; margin-top: 20px; display: none; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>🎬 영상 이어 붙이기</h1>
+    <p style="text-align: center; color: #666;">여러 영상을 하나로 합쳐보세요.</p>
+    
+    <div class="upload-box" onclick="document.getElementById('video-input').click()">
+        <p>클릭하여 동영상 파일들을 선택하세요 (여러 개 선택 가능)</p>
+        <input type="file" id="video-input" multiple accept="video/*" style="display: none;">
+    </div>
+
+    <div id="file-list" style="margin-bottom: 20px;"></div>
+
+    <button id="merge-btn" disabled>영상 합치기 시작</button>
+    <div id="status">FFmpeg 로딩을 준비 중입니다...</div>
+
+    <video id="output-video" controls></video>
+</div>
+
+<!-- FFmpeg.wasm 라이브러리 로드 -->
+<script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
+<script>
+    const { createFFmpeg, fetchFile } = FFmpeg;
+    const ffmpeg = createFFmpeg({ log: true });
+    
+    const videoInput = document.getElementById('video-input');
+    const mergeBtn = document.getElementById('merge-btn');
+    const statusDiv = document.getElementById('status');
+    const fileListDiv = document.getElementById('file-list');
+    const outputVideo = document.getElementById('output-video');
+
+    let selectedFiles = [];
+
+    // FFmpeg 로드
+    async function loadFFmpeg() {
+        statusDiv.innerText = "FFmpeg 라이브러리 로딩 중...";
+        await ffmpeg.load();
+        statusDiv.innerText = "준비 완료! 영상을 업로드해 주세요.";
+    }
+    loadFFmpeg();
+
+    // 파일 선택 이벤트
+    videoInput.addEventListener('change', (e) => {
+        selectedFiles = Array.from(e.target.files);
+        if (selectedFiles.length < 2) {
+            alert("영상을 최소 2개 이상 선택해주세요.");
+            mergeBtn.disabled = true;
+            return;
+        }
+
+        // 선택된 파일 목록 표시
+        fileListDiv.innerHTML = "<strong>선택된 파일:</strong><br>" + 
+            selectedFiles.map((file, idx) => `${idx + 1}. ${file.name}`).join('<br>');
+        
+        mergeBtn.disabled = false;
+    });
+
+    // 영상 합치기 실행
+    mergeBtn.addEventListener('click', async () => {
+        if (selectedFiles.length < 2) return;
+
+        mergeBtn.disabled = true;
+        statusDiv.innerText = "영상을 처리하는 중입니다. 잠시만 기다려주세요...";
+
+        try {
+            const inputNames = [];
+            let concatListContent = "";
+
+            // 1. FFmpeg 가상 파일 시스템에 파일 쓰기
+            for (let i = 0; i < selectedFiles.length; i++) {
+                const file = selectedFiles[i];
+                const safeName = `input_${i}.mp4`;
+                ffmpeg.FS('writeFile', safeName, await fetchFile(file));
+                concatListContent += `file '${safeName}'\n`;
+            }
+
+            // 2. 병합 목록 파일 생성
+            ffmpeg.FS('writeFile', 'list.txt', new TextEncoder().encode(concatListContent));
+
+            // 3. FFmpeg 명령 실행 (재인코딩 없이 빠르게 복사 병합)
+            await ffmpeg.run('-f', 'concat', '-safe', '0', '-i', 'list.txt', '-c', 'copy', 'output.mp4');
+
+            // 4. 결과 파일 가져오기
+            const data = ffmpeg.FS('readFile', 'output.mp4');
+
+            // 5. 비디오 플레이어에 재생 및 다운로드 링크 제공
+            const videoUrl = URL.createObjectURL(new Blob([data.buffer], { type: 'video/mp4' }));
+            outputVideo.src = videoUrl;
+            outputVideo.style.display = "block";
+            statusDiv.innerHTML = `<span style="color: green;">🎉 병합 완료!</span> 아래에서 확인하거나 <a href="${videoUrl}" download="merged.mp4">여기서 다운로드</a>하세요.`;
+
+        } catch (error) {
+            console.error(error);
+            statusDiv.innerText = "영상 처리 중 오류가 발생했습니다.";
+        } finally {
+            mergeBtn.disabled = false;
+        }
+    });
+</script>
+
+</body>
+</html>
