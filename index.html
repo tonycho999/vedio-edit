@@ -3,34 +3,53 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>비디오 병합기</title>
+    <title>비디오 순서대로 병합기</title>
     <style>
-        body { font-family: sans-serif; padding: 20px; background: #f5f5f5; }
-        .container { max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        h1 { text-align: center; color: #333; }
-        .upload-box { border: 2px dashed #ccc; padding: 20px; text-align: center; margin-bottom: 20px; cursor: pointer; }
-        button { width: 100%; padding: 12px; background: #007bff; color: white; border: none; border-radius: 4px; font-size: 16px; cursor: pointer; }
-        button:disabled { background: #ccc; }
-        #status { margin-top: 15px; text-align: center; font-weight: bold; color: #666; }
-        video { width: 100%; margin-top: 20px; display: none; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; background: #f0f2f5; }
+        .container { max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        h1 { text-align: center; color: #1a1a1a; }
+        p.desc { text-align: center; color: #666; margin-bottom: 20px; }
+        
+        /* 파일 리스트 스타일 */
+        .video-item { display: flex; justify-content: space-between; align-items: center; background: #f8f9fa; padding: 12px 15px; border: 1px solid #dee2e6; border-radius: 6px; margin-bottom: 10px; }
+        .video-info { display: flex; align-items: center; gap: 10px; overflow: hidden; }
+        .video-number { background: #007bff; color: white; padding: 4px 8px; border-radius: 4px; font-size: 14px; font-weight: bold; white-space: nowrap; }
+        .video-name { font-size: 15px; color: #333; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
+        
+        /* 버튼 스타일 */
+        button { padding: 12px; border: none; border-radius: 6px; font-size: 16px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        button:disabled { background: #e9ecef; color: #adb5bd; cursor: not-allowed; }
+        
+        .btn-add { background: #e3f2fd; color: #0d6efd; width: 100%; border: 2px dashed #0d6efd; margin-bottom: 20px; }
+        .btn-add:hover { background: #cfe2ff; }
+        
+        .btn-delete { background: #ff4d4f; color: white; padding: 6px 12px; font-size: 14px; border-radius: 4px; }
+        .btn-delete:hover { background: #d9363e; }
+        
+        .btn-merge { background: #198754; color: white; width: 100%; }
+        .btn-merge:hover:not(:disabled) { background: #157347; }
+        
+        #status { margin-top: 15px; text-align: center; font-weight: bold; color: #495057; }
+        video { width: 100%; margin-top: 20px; display: none; border-radius: 8px; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1>🎬 영상 이어 붙이기</h1>
-    <p style="text-align: center; color: #666;">여러 영상을 하나로 합쳐보세요.</p>
+    <h1>🎬 영상 순서대로 붙이기</h1>
+    <p class="desc">첫 번째 영상부터 차례대로 추가해주세요.</p>
     
-    <div class="upload-box" onclick="document.getElementById('video-input').click()">
-        <p>클릭하여 동영상 파일들을 선택하세요 (여러 개 선택 가능)</p>
-        <input type="file" id="video-input" multiple accept="video/*" style="display: none;">
-    </div>
+    <!-- 영상 리스트가 표시될 영역 -->
+    <div id="video-list"></div>
 
-    <div id="file-list" style="margin-bottom: 20px;"></div>
+    <!-- 영상 추가 버튼 및 숨겨진 input -->
+    <button class="btn-add" id="btn-add-video">+ 영상 추가하기</button>
+    <input type="file" id="video-input" accept="video/*" style="display: none;">
 
-    <button id="merge-btn" disabled>영상 합치기 시작</button>
+    <!-- 병합 실행 버튼 -->
+    <button class="btn-merge" id="btn-merge" disabled>영상 합치기 시작 (최소 2개 필요)</button>
+    
     <div id="status">FFmpeg 로딩을 준비 중입니다...</div>
-
     <video id="output-video" controls></video>
 </div>
 
@@ -41,76 +60,118 @@
     const ffmpeg = createFFmpeg({ log: true });
     
     const videoInput = document.getElementById('video-input');
-    const mergeBtn = document.getElementById('merge-btn');
+    const btnAddVideo = document.getElementById('btn-add-video');
+    const btnMerge = document.getElementById('btn-merge');
     const statusDiv = document.getElementById('status');
-    const fileListDiv = document.getElementById('file-list');
+    const videoListDiv = document.getElementById('video-list');
     const outputVideo = document.getElementById('output-video');
 
-    let selectedFiles = [];
+    // 선택된 영상들을 저장할 배열
+    let videoFiles = [];
 
     // FFmpeg 로드
     async function loadFFmpeg() {
-        statusDiv.innerText = "FFmpeg 라이브러리 로딩 중...";
+        statusDiv.innerText = "라이브러리 로딩 중...";
         await ffmpeg.load();
-        statusDiv.innerText = "준비 완료! 영상을 업로드해 주세요.";
+        statusDiv.innerText = "준비 완료! 영상을 추가해 주세요.";
     }
     loadFFmpeg();
 
-    // 파일 선택 이벤트
-    videoInput.addEventListener('change', (e) => {
-        selectedFiles = Array.from(e.target.files);
-        if (selectedFiles.length < 2) {
-            alert("영상을 최소 2개 이상 선택해주세요.");
-            mergeBtn.disabled = true;
-            return;
-        }
-
-        // 선택된 파일 목록 표시
-        fileListDiv.innerHTML = "<strong>선택된 파일:</strong><br>" + 
-            selectedFiles.map((file, idx) => `${idx + 1}. ${file.name}`).join('<br>');
-        
-        mergeBtn.disabled = false;
+    // 1. '영상 추가하기' 버튼 클릭 시 숨겨진 input 실행
+    btnAddVideo.addEventListener('click', () => {
+        videoInput.click();
     });
 
-    // 영상 합치기 실행
-    mergeBtn.addEventListener('click', async () => {
-        if (selectedFiles.length < 2) return;
+    // 2. 파일이 선택되었을 때 배열에 추가하고 화면 그리기
+    videoInput.addEventListener('change', (e) => {
+        if (e.target.files.length > 0) {
+            videoFiles.push(e.target.files[0]);
+            renderVideoList();
+        }
+        // 같은 파일을 지웠다 다시 추가할 수 있도록 input 초기화
+        e.target.value = ''; 
+    });
 
-        mergeBtn.disabled = true;
+    // 3. 화면에 리스트를 렌더링하고 삭제 버튼 기능 연결
+    function renderVideoList() {
+        videoListDiv.innerHTML = ''; // 기존 리스트 초기화
+
+        videoFiles.forEach((file, index) => {
+            const itemDiv = document.createElement('div');
+            itemDiv.className = 'video-item';
+            
+            // 리스트 내용 (번호, 파일명, 삭제버튼)
+            itemDiv.innerHTML = `
+                <div class="video-info">
+                    <span class="video-number">${index + 1}번째</span>
+                    <span class="video-name" title="${file.name}">${file.name}</span>
+                </div>
+                <button class="btn-delete" onclick="removeVideo(${index})">삭제</button>
+            `;
+            videoListDiv.appendChild(itemDiv);
+        });
+
+        // 영상이 2개 이상일 때만 병합 버튼 활성화
+        if (videoFiles.length >= 2) {
+            btnMerge.disabled = false;
+            btnMerge.innerText = "🚀 영상 합치기 시작";
+        } else {
+            btnMerge.disabled = true;
+            btnMerge.innerText = "영상 합치기 시작 (최소 2개 필요)";
+        }
+    }
+
+    // 4. 삭제 버튼 클릭 시 배열에서 제거 후 다시 그리기 (전역 함수로 설정)
+    window.removeVideo = function(index) {
+        videoFiles.splice(index, 1);
+        renderVideoList();
+    }
+
+    // 5. 영상 합치기 실행
+    btnMerge.addEventListener('click', async () => {
+        if (videoFiles.length < 2) return;
+
+        btnMerge.disabled = true;
+        btnAddVideo.disabled = true;
         statusDiv.innerText = "영상을 처리하는 중입니다. 잠시만 기다려주세요...";
+        outputVideo.style.display = "none";
 
         try {
-            const inputNames = [];
             let concatListContent = "";
 
-            // 1. FFmpeg 가상 파일 시스템에 파일 쓰기
-            for (let i = 0; i < selectedFiles.length; i++) {
-                const file = selectedFiles[i];
+            // FFmpeg 가상 파일 시스템에 파일 쓰기
+            for (let i = 0; i < videoFiles.length; i++) {
+                const file = videoFiles[i];
                 const safeName = `input_${i}.mp4`;
                 ffmpeg.FS('writeFile', safeName, await fetchFile(file));
                 concatListContent += `file '${safeName}'\n`;
             }
 
-            // 2. 병합 목록 파일 생성
+            // 병합 목록 파일 생성
             ffmpeg.FS('writeFile', 'list.txt', new TextEncoder().encode(concatListContent));
 
-            // 3. FFmpeg 명령 실행 (재인코딩 없이 빠르게 복사 병합)
+            // FFmpeg 명령 실행 (복사 병합)
             await ffmpeg.run('-f', 'concat', '-safe', '0', '-i', 'list.txt', '-c', 'copy', 'output.mp4');
 
-            // 4. 결과 파일 가져오기
+            // 결과 파일 가져오기
             const data = ffmpeg.FS('readFile', 'output.mp4');
 
-            // 5. 비디오 플레이어에 재생 및 다운로드 링크 제공
+            // 비디오 플레이어에 띄우기
             const videoUrl = URL.createObjectURL(new Blob([data.buffer], { type: 'video/mp4' }));
             outputVideo.src = videoUrl;
             outputVideo.style.display = "block";
-            statusDiv.innerHTML = `<span style="color: green;">🎉 병합 완료!</span> 아래에서 확인하거나 <a href="${videoUrl}" download="merged.mp4">여기서 다운로드</a>하세요.`;
+            
+            statusDiv.innerHTML = `
+                <span style="color: #198754;">🎉 병합 완료!</span> 
+                아래에서 확인하거나 <a href="${videoUrl}" download="merged_video.mp4" style="color:#0d6efd; font-weight:bold;">여기서 다운로드</a>하세요.
+            `;
 
         } catch (error) {
             console.error(error);
-            statusDiv.innerText = "영상 처리 중 오류가 발생했습니다.";
+            statusDiv.innerHTML = `<span style="color: red;">영상 처리 중 오류가 발생했습니다. 포맷이 다른 영상일 수 있습니다.</span>`;
         } finally {
-            mergeBtn.disabled = false;
+            btnMerge.disabled = false;
+            btnAddVideo.disabled = false;
         }
     });
 </script>
